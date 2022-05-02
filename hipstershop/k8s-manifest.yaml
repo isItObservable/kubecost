@@ -770,7 +770,7 @@ spec:
             sidecar.istio.io/rewriteAppHTTPProbers: "true"
         spec:
           terminationGracePeriodSeconds: 5
-          restartPolicy: Always
+          restartPolicy: OnFailure
           containers:
             - name: k6load
               image: hrexed/k6-prometheus:0.1
@@ -778,7 +778,7 @@ spec:
               args: ["-u", "30", "-d", "50m"]
               env:
                 - name: FRONTEND_ADDR
-                  value: "onlineboutique.IP_TO_REPLACE.nip.io"
+                  value: "isitobservable.IP_TO_REPLACE.nip.io"
                 - name: K6_PROMETHEUS_REMOTE_URL
                   value: http://prometheus-kube-prometheus-prometheus.default.svc.cluster.local:9090/api/v1/write
               resources:

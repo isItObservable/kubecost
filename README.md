@@ -260,8 +260,136 @@ kubectl edit Prometheus prometheus-kube-prometheus-prometheus
 ```
 kubectl create namespace kubecost
 helm repo add kubecost https://kubecost.github.io/cost-analyzer/
-helm install kubecost kubecost/cost-analyzer --namespace kubecost --set kubecostToken="aGVucmlrLnJleGVkQGR5bmF0cmFjZS5jb20=xm343yadf98" --set prometheus.kube-state-metrics.disabled=false --set prometheus.nodeExporter.enabled=false --set ingress.enabled=true --set ingress.hosts="kubecost.$IP.nip.io" --set global.grafana=false --set global.grafana.fqdn="http://GRAFANA_SERVICE.default.svc" --set prometheusRule.enabled=true --set global.prometheus.fqdn="http://$PROMETHEUS_SERVER.default.svc:9090"
+helm install kubecost kubecost/cost-analyzer --namespace kubecost --set kubecostToken="aGVucmlrLnJleGVkQGR5bmF0cmFjZS5jb20=xm343yadf98" --set prometheus.kube-state-metrics.disabled=true --set prometheus.nodeExporter.enabled=false --set ingress.enabled=true --set ingress.hosts[0]="kubecost.$IP.nip.io" --set global.grafana.enabled=false --set global.grafana.fqdn="http://$GRAFANA_SERVICE.default.svc" --set prometheusRule.enabled=true --set global.prometheus.fqdn="http://$PROMETHEUS_SERVER.default.svc:9090" --set global.prometheus.enabled=false --set serviceMonitor.enabled=true
 ```
+##### 1. Update the KubeCost Service
+```
+kubectl get svc -n kubecost
+```
+you should get the following output :
+```
+NAME                     TYPE       CLUSTER-IP     EXTERNAL-IP   PORT(S)                         AGE
+kubecost-cost-analyzer   ClusterIP  10.19.250.63   <none>        9003:32335/TCP,9090:30348/TCP   138m
+```
+This service needs to be update into a NodePort service
+```
+kubectl edit svc kubecost-cost-analyzer -n kubecost
+```
+and change the type into nodePort :
+```
+  selector:
+    app: cost-analyzer
+    app.kubernetes.io/instance: kubecost
+    app.kubernetes.io/name: cost-analyzer
+  sessionAffinity: None
+  type: NodePort
+```
+##### 2. Update the configuration of kubecost to configure the alertManager
+Let's get the name of the service of our AlertManager
+```
+kubectl get svc
+```
+you should get the following output:
+```
+NAME                                      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                                AGE
+kubernetes                                ClusterIP   10.19.240.1     <none>        443/TCP                                383d
+prometheus-grafana                        NodePort    10.19.240.55    <none>        80:32587/TCP                           108d
+prometheus-kube-prometheus-alertmanager   ClusterIP   10.19.242.144   <none>        9093/TCP                               108d
+prometheus-kube-prometheus-operator       ClusterIP   10.19.255.217   <none>        443/TCP                                108d
+prometheus-kube-prometheus-prometheus     ClusterIP   10.19.247.101   <none>        9090/TCP                               108d
+prometheus-kube-state-metrics             ClusterIP   10.19.245.225   <none>        8080/TCP                               108d
+prometheus-operated                       ClusterIP   None            <none>        9090/TCP                               108d
+prometheus-prometheus-node-exporter       ClusterIP   10.19.247.255   <none>        9100/TCP                               108d
+```
+our alert manager service is `prometheus-kube-prometheus-alertmanager` listening on the port `9093`
+
+Let's update the Configmap of Kubecost :
+```
+kubectl get cm -n kubecost
+```
+you should get the following output :
+```
+NAME                               DATA   AGE
+attached-disk-metrics-dashboard    1      143m
+cluster-metrics-dashboard          1      143m
+cluster-utilization-dashboard      1      143m
+deployment-utilization-dashboard   1      143m
+kube-root-ca.crt                   1      144m
+kubecost-cost-analyzer             3      143m
+label-cost-dashboard               1      143m
+namespace-utilization-dashboard    1      143m
+nginx-conf                         1      143m
+node-utilization-dashboard         1      143m
+pod-utilization-dashboard          1      143m
+prom-benchmark-dashboard           1      143m
+```
+we will update the configmap named `kubecost-cost-analyzer`
+```
+kubectl edit cm kubecost-cost-analyzer  -n kubecost
+```
+make sure all the configuration are correct :
+```
+apiVersion: v1
+data:
+kubecost-token: aGVucmlrLnJleGVkQGR5bmF0cmFjZS5jb20=xm343yadf98
+prometheus-alertmanager-endpoint: http://prometheus-kube-prometheus-alertmanager.default.svc:9093
+prometheus-server-endpoint: http://prometheus-kube-prometheus-prometheus.default.svc:9090
+kind: ConfigMap
+metadata:
+annotations:
+meta.helm.sh/release-name: kubecost
+meta.helm.sh/release-namespace: kubecost
+creationTimestamp: "2022-05-02T15:14:14Z"
+labels:
+app: cost-analyzer
+app.kubernetes.io/instance: kubecost
+app.kubernetes.io/managed-by: Helm
+app.kubernetes.io/name: cost-analyzer
+helm.sh/chart: cost-analyzer-1.92.0
+name: kubecost-cost-analyzer
+namespace: kubecost
+```
+
+then Let's make sure the Grafana url is correct in the other Configmap `nginx-conf`
+```
+kubectl edit cm nginx-conf -n kubecost
+```
+update the grafana upstream url :
+```
+upstream grafana {
+server prometheus-grafana.default.svc;
+}
+```
+
+
+##### 2. Update the ingress of Kubecost 
+```
+kubectl get ingress -n kubecost
+```
+you should get the following output :
+```
+NAME                     CLASS    HOSTS                          ADDRESS        PORTS   AGE
+kubecost-cost-analyzer   <none>   kubecost.34.89.214.38.nip.io   34.89.214.38   80      148m
+```
+let's edit the ingress to add the nginx class :
+```
+kubectl edit ingress kubecost-cost-analyzer  -n kubecost
+```
+make sure to add the following annotation : `kubernetes.io/ingress.class: nginx`
+```
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+annotations:
+ingress.kubernetes.io/backends: '{"k8s-be-30348--560d80e95126adbd":"UNHEALTHY","k8s-be-31223--560d80e95126adbd":"HEALTHY"}'
+ingress.kubernetes.io/forwarding-rule: k8s2-fr-xw9dp7bo-kubecost-kubecost-cost-analyzer-5laj3bq5
+ingress.kubernetes.io/target-proxy: k8s2-tp-xw9dp7bo-kubecost-kubecost-cost-analyzer-5laj3bq5
+ingress.kubernetes.io/url-map: k8s2-um-xw9dp7bo-kubecost-kubecost-cost-analyzer-5laj3bq5
+kubernetes.io/ingress.class: nginx
+meta.helm.sh/release-name: kubecost
+meta.helm.sh/release-namespace: kubecost
+```
+
 #### 5. Add the Kubecost dashboard in Grafana 
 ##### 1. Create a Grafana Api token 
 ```
