@@ -4,7 +4,7 @@
 ## How to observe the cost of your cluster using Kubecost 
 <p align="center"><img src="/image/kubecost_logo.png" width="40%" alt="Litmus Logo" /></p>
 
-This tutorial will deploy Litmus and run an Experimnets validating the request/limits settings.
+This tutorial will deploy Kubecost and configure it to utilize an existing Prometheus/Grafana instances.
 
 
 ## Prerequisite 
